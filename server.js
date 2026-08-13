@@ -72,7 +72,7 @@ const server = http.createServer((req, res) => {
   fs.readFile(abs, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not Found: ' + url); return; }
     const ext = path.extname(abs).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(data);
   });
 });
