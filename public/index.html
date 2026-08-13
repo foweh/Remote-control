@@ -58,6 +58,14 @@
     color: #818cf8;
     word-break: break-all;
     user-select: all;
+    display: block;
+    text-decoration: none;
+  }
+  .scan-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #777;
+    line-height: 1.7;
   }
 
   .ip-bar { margin-top: 28px; text-align: center; }
@@ -107,12 +115,14 @@
       <div class="desc">手机当触摸板：移动 / 左键 / 右键 / 滚轮 / 键盘输入</div>
       <div class="qr-box"><div id="qrControl"></div></div>
       <a class="url-text" id="urlControl" target="_blank" rel="noopener"></a>
+      <div class="scan-hint">用手机自带相机扫码可直接打开网页；<br />若用微信扫码显示为文本：长按复制 → 粘贴到手机浏览器打开</div>
     </div>
     <div class="card">
       <h2>🔼🔽 滚轮遥控</h2>
       <div class="desc">只有上下两个箭头：按住连续丝滑滚动，速度可调</div>
       <div class="qr-box"><div id="qrScroll"></div></div>
       <a class="url-text" id="urlScroll" target="_blank" rel="noopener"></a>
+      <div class="scan-hint">用手机自带相机扫码可直接打开网页；<br />若用微信扫码显示为文本：长按复制 → 粘贴到手机浏览器打开</div>
     </div>
   </div>
 
@@ -227,7 +237,10 @@
       qrScroll  = new QRCode($('qrScroll'),  { width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
       var saved = null;
       try { saved = localStorage.getItem('mousectrl_ip'); } catch (e) {}
-      var pick = (saved && ips.indexOf(saved) >= 0) ? saved : ips[0];
+      var usable = ips.filter(function (ip) {
+        return ip.indexOf('169.254.') !== 0 && ip !== '本机IP未找到';
+      });
+      var pick = (saved && usable.indexOf(saved) >= 0) ? saved : (usable[0] || ips[0]);
       selectIp(pick);
       connectWS();
     }).catch(function () {
