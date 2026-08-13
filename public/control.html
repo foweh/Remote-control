@@ -203,7 +203,7 @@
       }
       if (accDx || accDy) {
         var x = Math.round(accDx), y = Math.round(accDy);
-        accDx = 0; accDy = 0;
+        accDx -= x; accDy -= y; // 保留亚像素余量，低灵敏度下微动不丢
         if (x || y) send({ t: 'r', dx: x, dy: y });
       }
     });
@@ -320,6 +320,10 @@
       tapCandidate = null;
       twoFinger = null;
       relPrev = null;
+    } else if (touches.size === 1) {
+      // 双指回到单指：重置相对基准，避免下一帧光标瞬跳
+      var rem = Array.from(touches.values())[0];
+      relPrev = { x: rem.x, y: rem.y };
     }
   }, { passive: false });
 

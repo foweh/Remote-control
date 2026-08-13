@@ -1,17 +1,20 @@
 # ============================================================
-#  mouse-ctrl-v3 — 鼠标驱动（常驻进程）
-#  由 server.js 拉起，通过 stdin 接收一行一条的文本指令：
+#  mouse-ctrl-v3 - mouse driver (persistent process)
+#  Launched by server.js. Reads one text command per line from stdin:
 #
-#    M <x> <y>        绝对移动（虚拟屏幕坐标）
-#    R <dx> <dy>      相对移动（读当前位置+偏移，无加速，丝滑）
-#    LD / LU / LC     左键 按下/抬起/单击
-#    RD / RU / RC     右键 按下/抬起/单击
-#    W <delta>        滚轮（+向上 / -向下，120 = 一格，可发小数增量）
-#    K <文本>         键盘输入（ASCII 走 SendKeys；含中文走剪贴板粘贴）
-#    P                ping，回一行 OK
+#    M <x> <y>        absolute move (virtual-screen coords)
+#    R <dx> <dy>      relative move (read cursor + offset, no acceleration)
+#    LD / LU / LC     left button down / up / click
+#    RD / RU / RC     right button down / up / click
+#    W <delta>        wheel (+up / -down, 120 = one notch, fractional OK)
+#    K <text>         keyboard input (ASCII via SendKeys, CJK via clipboard)
+#    P                ping, replies with a line: OK
 #
-#  启动时向 stdout 输出一行虚拟屏幕边界:  B <x> <y> <w> <h>
-#  -SelfTest: 只自检（编译 P/Invoke + 读边界/光标），不动鼠标
+#  On startup, emits virtual-screen bounds to stdout:  B <x> <y> <w> <h>
+#  -SelfTest: compile check + read bounds/cursor only, never moves the mouse
+#
+#  NOTE: this file is intentionally ASCII-only (no CJK), because the
+#  whole driver depends on it parsing correctly under PowerShell 5.1.
 # ============================================================
 param([switch]$SelfTest)
 $ErrorActionPreference = 'Stop'
@@ -33,7 +36,7 @@ public static class MouseWin {
 }
 "@
 
-# ---------- 虚拟屏幕边界（多显示器合并区域） ----------
+# ---------- virtual screen bounds (all monitors combined) ----------
 $vs   = [System.Windows.Forms.SystemInformation]::VirtualScreen
 $BX   = [int]$vs.X
 $BY   = [int]$vs.Y
@@ -62,12 +65,12 @@ function Send-Key([string]$text) {
         if ([int]$ch -gt 126) { $ascii = $false; break }
     }
     if ($ascii) {
-        # SendKeys 特殊字符转义（花括号必须先转义）
+        # SendKeys special chars must be escaped (braces first)
         $escaped = $text.Replace('{','{{}').Replace('}','{}}')
         $escaped = $escaped.Replace('+','{+}').Replace('^','{^}').Replace('%','{%}').Replace('~','{~}').Replace('(','{(}').Replace(')','{)}').Replace('[','{[}').Replace(']','{]}')
         [System.Windows.Forms.SendKeys]::SendWait($escaped)
     } else {
-        # 中文等非 ASCII：剪贴板 + Ctrl+V（注意会占用剪贴板）
+        # CJK etc: clipboard + Ctrl+V (temporarily uses the clipboard)
         [System.Windows.Forms.Clipboard]::SetText($text)
         [System.Windows.Forms.SendKeys]::SendWait('^v')
     }
@@ -84,54 +87,58 @@ if ($SelfTest) {
 
 Emit 'READY'
 
-# 统一 UTF-8 通道（指令均为 ASCII，K 的文本可能含中文）
+# unified UTF-8 channel (commands are ASCII; K payload may contain CJK)
 [Console]::InputEncoding  = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
 while ($true) {
     $line = [Console]::In.ReadLine()
-    if ($null -eq $line) { break }          # stdin 关闭 -> 退出
+    if ($null -eq $line) { break }          # stdin closed -> exit
 
     $line = $line.Trim()
     if ($line.Length -eq 0) { continue }
 
     $cmd = $line[0]
-    switch ($cmd) {
-        'M' { # M x y
-            $parts = $line.Substring(1).Trim().Split(' ')
-            Set-Pos ([int]$parts[0]) ([int]$parts[1])
-            break
-        }
-        'R' { # R dx dy / RD / RU / RC
-            if    ($line -eq 'RD') { [MouseWin]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero) }
-            elseif($line -eq 'RU') { [MouseWin]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
-            elseif($line -eq 'RC') { [MouseWin]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero); [MouseWin]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
-            else { # 相对移动（读光标+偏移，完全无加速）
+    try {
+        switch ($cmd) {
+            'M' { # M x y
                 $parts = $line.Substring(1).Trim().Split(' ')
-                $p = [MouseWin+POINT]::new()
-                [MouseWin]::GetCursorPos([ref]$p) | Out-Null
-                Set-Pos ($p.X + [int]$parts[0]) ($p.Y + [int]$parts[1])
+                Set-Pos ([int]$parts[0]) ([int]$parts[1])
+                break
             }
-            break
+            'R' { # R dx dy / RD / RU / RC
+                if    ($line -eq 'RD') { [MouseWin]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero) }
+                elseif($line -eq 'RU') { [MouseWin]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
+                elseif($line -eq 'RC') { [MouseWin]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero); [MouseWin]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
+                else { # relative move: read cursor + offset, zero acceleration
+                    $parts = $line.Substring(1).Trim().Split(' ')
+                    $p = [MouseWin+POINT]::new()
+                    [MouseWin]::GetCursorPos([ref]$p) | Out-Null
+                    Set-Pos ($p.X + [int]$parts[0]) ($p.Y + [int]$parts[1])
+                }
+                break
+            }
+            'L' { # LD / LU / LC
+                if    ($line -eq 'LD') { [MouseWin]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) }
+                elseif($line -eq 'LU') { [MouseWin]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
+                elseif($line -eq 'LC') { [MouseWin]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); [MouseWin]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
+                break
+            }
+            'W' { # W delta
+                $delta = [int]($line.Substring(1).Trim())
+                [MouseWin]::mouse_event(0x0800, 0, 0, [uint32]$delta, [UIntPtr]::Zero)
+                break
+            }
+            'K' { # K text
+                Send-Key ($line.Substring(1).Trim())
+                break
+            }
+            'P' {
+                Emit 'OK'
+                break
+            }
         }
-        'L' { # LD / LU / LC
-            if    ($line -eq 'LD') { [MouseWin]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) }
-            elseif($line -eq 'LU') { [MouseWin]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
-            elseif($line -eq 'LC') { [MouseWin]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); [MouseWin]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }
-            break
-        }
-        'W' { # W delta
-            $delta = [int]($line.Substring(1).Trim())
-            [MouseWin]::mouse_event(0x0800, 0, 0, [uint32]$delta, [UIntPtr]::Zero)
-            break
-        }
-        'K' { # K text
-            Send-Key ($line.Substring(1).Trim())
-            break
-        }
-        'P' {
-            Emit 'OK'
-            break
-        }
+    } catch {
+        # One bad command is skipped; the driver must never die.
     }
 }

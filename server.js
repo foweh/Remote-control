@@ -111,6 +111,7 @@ function startPS() {
   p.on('exit', (code) => {
     ps = null;
     psReady = false;
+    pongQueue.length = 0; // 清空待回复的 ping，避免积压
     for (const c of clients) stopScroll(c, true);
     console.log(`[mouse.ps1 退出 code=${code}] 1.5 秒后自动重启...`);
     setTimeout(startPS, 1500);
@@ -121,11 +122,17 @@ function onPSLine(line) {
   const t = line.trim();
   if (line.startsWith('B ')) {
     const p = line.split(/\s+/);
-    bounds = { x: +p[1], y: +p[2], w: +p[3], h: +p[4] };
-    console.log(`[鼠标驱动] 虚拟屏幕 ${bounds.w}x${bounds.h} @(${bounds.x},${bounds.y})`);
-    // 驱动晚于手机连接时，把真实边界推送给已连接的手机
-    for (const c of clients) {
-      if (c.page === 'control' || c.page === 'scroll') sendJSON(c, { t: 'bounds', ...bounds });
+    const b = { x: +p[1], y: +p[2], w: +p[3], h: +p[4] };
+    // 校验：非有限数字一律丢弃，防止 NaN 坐标毒化
+    if (![b.x, b.y, b.w, b.h].every(Number.isFinite) || b.w <= 0 || b.h <= 0) {
+      console.warn('[鼠标驱动] 非法边界行，忽略:', line);
+    } else {
+      bounds = b;
+      console.log(`[鼠标驱动] 虚拟屏幕 ${bounds.w}x${bounds.h} @(${bounds.x},${bounds.y})`);
+      // 驱动晚于手机连接时，把真实边界推送给已连接的手机
+      for (const c of clients) {
+        if (c.page === 'control' || c.page === 'scroll') sendJSON(c, { t: 'bounds', ...bounds });
+      }
     }
   } else if (t === 'READY') {
     psReady = true;
@@ -292,7 +299,7 @@ function handleMessage(c, m) {
   }
 }
 
-// ---------------- 服务端滚轮循环（温柔丝滑：400ms 缓动入 / 100ms 渐出） ----------------
+// ---------------- 服务端滚轮循环（长按缓慢起滚：1.5s 缓动入 / 100ms 渐出） ----------------
 function startScroll(c, dir) {
   if (c.scroll) { // 已激活：仅切换方向、取消渐出
     c.scroll.dir = dir;

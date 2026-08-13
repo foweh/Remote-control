@@ -200,7 +200,12 @@
     if (d !== active) press(d);
   }, { passive: false });
 
-  document.addEventListener('touchend', function () { release(); });
+  document.addEventListener('touchend', function (e) {
+    if (e.touches.length === 0) { release(); return; }
+    // 还有手指按着：以剩余手指所在半屏为准，自动纠正方向
+    var d = zoneOf(e.touches[0]);
+    if (active && d !== active) press(d);
+  });
   document.addEventListener('touchcancel', function () { release(); });
   document.addEventListener('mouseup', function () { release(); });
 
