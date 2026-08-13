@@ -111,6 +111,7 @@
     速度
     <input type="range" id="speed" min="1" max="10" step="1" value="3" />
     <span id="speedVal">3</span>
+    <button id="btnMode" style="background:rgba(255,255,255,0.07);border:none;color:#ccc;padding:6px 12px;border-radius:14px;font-size:12px;flex-shrink:0;">精细·连续</button>
   </div>
 
 <script>
@@ -118,6 +119,8 @@
   'use strict';
   var ws = null;
   var speed = 3;
+  var wmode = 'fine'; // fine = 小步连续（浏览器等）；notch = 整格（希沃等只认整格的软件）
+  try { wmode = localStorage.getItem('mousectrl_wmode') || 'fine'; } catch (e) {}
   var active = null; // 'up' | 'down' | null
   var pingTimer = null;
 
@@ -136,6 +139,7 @@
     ws.onopen = function () {
       setStatus(true, '已连接');
       send({ t: 'wset', v: speed }); // 连接后同步当前速度
+      send({ t: 'wmode', v: wmode }); // 同步滚动模式
     };
     ws.onmessage = function (ev) {
       var m;
@@ -213,6 +217,19 @@
     $('speedVal').textContent = speed;
     send({ t: 'wset', v: speed });
   };
+
+  // ---------- 模式开关：精细（小步连续）/ 整格（标准一格，兼容希沃等） ----------
+  var btnMode = $('btnMode');
+  function updateModeBtn() {
+    btnMode.textContent = wmode === 'fine' ? '精细·连续' : '整格·通用';
+  }
+  btnMode.onclick = function () {
+    wmode = wmode === 'fine' ? 'notch' : 'fine';
+    try { localStorage.setItem('mousectrl_wmode', wmode); } catch (e) {}
+    updateModeBtn();
+    send({ t: 'wmode', v: wmode });
+  };
+  updateModeBtn();
 
   connect();
   startPing();

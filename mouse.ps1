@@ -28,7 +28,7 @@ public static class MouseWin {
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X; public int Y; }
     [DllImport("user32.dll")]
-    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, int dwData, UIntPtr dwExtraInfo);
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
     [DllImport("user32.dll")]
@@ -62,16 +62,18 @@ function Send-Key([string]$text) {
     if ([string]::IsNullOrEmpty($text)) { return }
     $ascii = $true
     foreach ($ch in $text.ToCharArray()) {
-        if ([int]$ch -gt 126) { $ascii = $false; break }
+        if ([int]$ch -gt 126 -and [int]$ch -ne 1) { $ascii = $false; break }
     }
     if ($ascii) {
-        # SendKeys special chars must be escaped (braces first)
+        # SendKeys specials escaped first (braces first); newline marker 0x01 -> Enter (inserted last, safe)
         $escaped = $text.Replace('{','{{}').Replace('}','{}}')
         $escaped = $escaped.Replace('+','{+}').Replace('^','{^}').Replace('%','{%}').Replace('~','{~}').Replace('(','{(}').Replace(')','{)}').Replace('[','{[}').Replace(']','{]}')
+        $escaped = $escaped.Replace([string][char]1, '{ENTER}')
         [System.Windows.Forms.SendKeys]::SendWait($escaped)
     } else {
-        # CJK etc: clipboard + Ctrl+V (temporarily uses the clipboard)
-        [System.Windows.Forms.Clipboard]::SetText($text)
+        # CJK etc: clipboard + Ctrl+V (temporarily uses the clipboard); 0x01 -> real newline
+        $t2 = $text.Replace([string][char]1, "`r`n")
+        [System.Windows.Forms.Clipboard]::SetText($t2)
         [System.Windows.Forms.SendKeys]::SendWait('^v')
     }
 }
@@ -101,9 +103,24 @@ while ($true) {
     $cmd = $line[0]
     try {
         switch ($cmd) {
-            'M' { # M x y
+            'M' { # M x y / MC
+                if ($line -eq 'MC') {
+                    [MouseWin]::mouse_event(0x0020, 0, 0, 0, [UIntPtr]::Zero)
+                    [MouseWin]::mouse_event(0x0040, 0, 0, 0, [UIntPtr]::Zero)
+                    break
+                }
                 $parts = $line.Substring(1).Trim().Split(' ')
                 Set-Pos ([int]$parts[0]) ([int]$parts[1])
+                break
+            }
+            'D' { # DC double click
+                if ($line -eq 'DC') {
+                    [MouseWin]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+                    [MouseWin]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+                    Start-Sleep -Milliseconds 40
+                    [MouseWin]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+                    [MouseWin]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+                }
                 break
             }
             'R' { # R dx dy / RD / RU / RC
@@ -126,7 +143,7 @@ while ($true) {
             }
             'W' { # W delta
                 $delta = [int]($line.Substring(1).Trim())
-                [MouseWin]::mouse_event(0x0800, 0, 0, [uint32]$delta, [UIntPtr]::Zero)
+                [MouseWin]::mouse_event(0x0800, 0, 0, $delta, [UIntPtr]::Zero)
                 break
             }
             'K' { # K text

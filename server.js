@@ -271,6 +271,8 @@ function handleMessage(c, m) {
     }
     case 'lc': mouseCmd('LC'); break;
     case 'rc': mouseCmd('RC'); break;
+    case 'mc': mouseCmd('MC'); break;  // 中键
+    case 'dc': mouseCmd('DC'); break;  // 双击
     case 'ld': mouseCmd('LD'); break;
     case 'lu': mouseCmd('LU'); break;
     case 'rd': mouseCmd('RD'); break;
@@ -282,7 +284,7 @@ function handleMessage(c, m) {
       break;
     }
     case 'k': {
-      const text = String(m.text || '').replace(/[\r\n]+/g, ' ').slice(0, 4000);
+      const text = String(m.text || '').replace(/\r\n|\r|\n/g, '\x01').slice(0, 4000);
       if (text) mouseCmd('K ' + text);
       break;
     }
@@ -296,21 +298,25 @@ function handleMessage(c, m) {
       c.wspeed = Math.min(10, Math.max(1, Math.round(+m.v || 3)));
       break;
     }
+    case 'wmode': {
+      c.wmode = m.v === 'notch' ? 'notch' : 'fine';
+      break;
+    }
   }
 }
 
 // ---------------- 服务端滚轮循环（长按缓慢起滚：1.5s 缓动入 / 100ms 渐出） ----------------
 function startScroll(c, dir) {
-  if (c.scroll) { // 已激活：仅切换方向、取消渐出，并立即反馈一格
+  if (c.scroll) { // 已激活：仅切换方向、取消渐出，整格模式立即反馈一格
     c.scroll.dir = dir;
     c.scroll.out = false;
-    mouseCmd('W ' + (dir === 'up' ? 120 : -120));
+    if (c.wmode === 'notch') mouseCmd('W ' + (dir === 'up' ? 120 : -120));
     return;
   }
   c.scroll = { dir, ramp: 0, phase: 0, out: false };
   c.scroll.timer = setInterval(() => tickScroll(c), 16);
-  // 按下立刻滚一格：零延迟反馈，不等缓动攒格（希沃等软件只认整格 120）
-  mouseCmd('W ' + (dir === 'up' ? 120 : -120));
+  // 整格模式：按下立刻滚一格，零延迟反馈；精细模式首 tick 16ms 内即发小步
+  if (c.wmode === 'notch') mouseCmd('W ' + (dir === 'up' ? 120 : -120));
 }
 
 function tickScroll(c) {
@@ -323,11 +329,19 @@ function tickScroll(c) {
     if (s.ramp <= 0) { stopScroll(c, true); return; }
   }
   const target = c.wspeed || 3;               // 滑块目标速度（格/秒）
-  const speed = 0.25 + (target - 0.25) * s.ramp; // 起步仅 0.25 格/秒，缓慢精细可控
-  s.phase += speed * 16 / 1000;               // 整格累计（1 格 = 120，所有软件通用）
-  while (s.phase >= 1) {
-    s.phase -= 1;
-    mouseCmd('W ' + (s.dir === 'up' ? 120 : -120));
+  const speed = 0.25 + (target - 0.25) * s.ramp; // 起步仅 0.25 格/秒
+  const sign = s.dir === 'up' ? 1 : -1;
+  if (c.wmode === 'notch') {
+    // 整格模式：累计到整格 120 才发（希沃等只认整格的软件通用）
+    s.phase += speed * 16 / 1000;
+    while (s.phase >= 1) {
+      s.phase -= 1;
+      mouseCmd('W ' + sign * 120);
+    }
+  } else {
+    // 精细模式：每 16ms 发一小步（约 2-20 单位，浏览器中≈像素），连续丝滑
+    const d = Math.max(1, Math.round(speed * 2));
+    mouseCmd('W ' + sign * d);
   }
 }
 
@@ -359,6 +373,7 @@ server.on('upgrade', (req, sock) => {
     sock,
     page,
     wspeed: 3,
+    wmode: 'fine',
     scroll: null,
     wsState: { buf: Buffer.alloc(0), frag: null },
     pingTs: null,

@@ -125,7 +125,7 @@
   <div class="btnrow">
     <button id="btnMode" class="active">相对模式</button>
     <div class="sens-wrap" id="sensWrap">
-      灵敏度 <input type="range" id="sens" min="0.25" max="3" step="0.1" value="1.0" />
+      灵敏度·相对 <input type="range" id="sens" min="0.25" max="3" step="0.1" value="1.0" />
       <span id="sensVal" style="min-width:30px;text-align:center;">1.0</span>
     </div>
     <button id="btnLock" class="small">拖动锁:关</button>
@@ -134,6 +134,8 @@
   <div class="btnrow">
     <button id="btnLC">🖱️ 左键</button>
     <button id="btnRC">右键</button>
+    <button id="btnMC" class="small">中键</button>
+    <button id="btnDC" class="small">双击</button>
     <button id="btnWU" class="small">▲滚</button>
     <button id="btnWD" class="small">▼滚</button>
     <button id="btnKbd" class="small">⌨️</button>
@@ -143,7 +145,7 @@
     <div id="padHints">
       <div>单指滑动 = 移动鼠标 · 长按 = 右键</div>
       <div>单击 = 左键 · 双击第二下按住拖动 = 拖拽</div>
-      <div>双指点击 = 右键 · 双指上下滑 = 滚轮</div>
+      <div>双指点击 = 右键 · 双指上下滑 = 滚轮 · 三指点击 = 中键</div>
     </div>
   </div>
 
@@ -167,6 +169,7 @@
   var touches = new Map();
   var tapCandidate = null;
   var twoFinger = null;
+  var threeFinger = null;
   var relPrev = null;
   var pendingTap = 0;   // 首次点按时间戳，用于识别双击第二下
   var secondTap = false;
@@ -284,6 +287,12 @@
       tapCandidate = null;
       var arr = Array.from(touches.values());
       twoFinger = { lastY: (arr[0].y + arr[1].y) / 2, moved: 0, t: Date.now() };
+    } else if (touches.size === 3) {
+      clearTimeout(longTimer);
+      tapCandidate = null;
+      twoFinger = null;
+      var arr3 = Array.from(touches.values());
+      threeFinger = { y: (arr3[0].y + arr3[1].y + arr3[2].y) / 3, moved: 0, t: Date.now() };
     }
   }, { passive: false });
 
@@ -322,6 +331,11 @@
       twoFinger.lastY = midY;
       twoFinger.moved += Math.abs(dy);
       if (dy) send({ t: 'w', d: Math.round(-dy * 3) }); // 手指上滑 = 滚轮向上
+    } else if (touches.size === 3 && threeFinger) {
+      var arr3 = Array.from(touches.values());
+      var mid3 = (arr3[0].y + arr3[1].y + arr3[2].y) / 3;
+      threeFinger.moved += Math.abs(mid3 - threeFinger.y);
+      threeFinger.y = mid3;
     }
   }, { passive: false });
 
@@ -351,8 +365,12 @@
       if (twoFinger && twoFinger.moved < 12 && Date.now() - twoFinger.t < 300) {
         send({ t: 'rc' });
       }
+      if (threeFinger && threeFinger.moved < 15 && Date.now() - threeFinger.t < 300) {
+        send({ t: 'mc' });
+      }
       tapCandidate = null;
       twoFinger = null;
+      threeFinger = null;
       relPrev = null;
     } else if (touches.size === 1) {
       // 双指回到单指：重置相对基准，避免下一帧光标瞬跳
@@ -366,6 +384,7 @@
     touches.clear();
     tapCandidate = null;
     twoFinger = null;
+    threeFinger = null;
     relPrev = null;
   });
   pad.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -379,6 +398,8 @@
 
   $('btnLC').onclick = function () { send({ t: 'lc' }); };
   $('btnRC').onclick = function () { send({ t: 'rc' }); };
+  $('btnMC').onclick = function () { send({ t: 'mc' }); };
+  $('btnDC').onclick = function () { send({ t: 'dc' }); };
   $('btnWU').onclick = function () { send({ t: 'w', d: 120 }); };
   $('btnWD').onclick = function () { send({ t: 'w', d: -120 }); };
 
@@ -386,7 +407,7 @@
     mode = mode === 'abs' ? 'rel' : 'abs';
     this.textContent = mode === 'abs' ? '绝对模式' : '相对模式';
     this.classList.toggle('active', mode === 'rel');
-    $('sensWrap').style.opacity = mode === 'rel' ? '1' : '0.35';
+    $('sensWrap').style.display = mode === 'rel' ? '' : 'none';
   };
 
   $('sens').oninput = function () {
@@ -405,12 +426,19 @@
     p.style.display = p.style.display === 'none' ? 'block' : 'none';
     if (p.style.display === 'block') $('kbdText').focus();
   };
-  $('kbdSend').onclick = function () {
+  function sendKbd() {
     var t = $('kbdText').value;
     if (t) send({ t: 'k', text: t });
     $('kbdText').value = '';
-    $('kbdPanel').style.display = 'none';
-  };
+    $('kbdText').focus(); // 常驻：发完不关闭，可连续输入（手机输入法/语音）
+  }
+  $('kbdSend').onclick = sendKbd;
+  $('kbdText').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendKbd();
+    }
+  });
   $('kbdClose').onclick = function () {
     $('kbdPanel').style.display = 'none';
   };
