@@ -123,10 +123,10 @@
   </div>
 
   <div class="btnrow">
-    <button id="btnMode">绝对模式</button>
+    <button id="btnMode" class="active">相对模式</button>
     <div class="sens-wrap" id="sensWrap">
-      灵敏度 <input type="range" id="sens" min="0.5" max="4" step="0.25" value="1.5" />
-      <span id="sensVal" style="min-width:30px;text-align:center;">1.5</span>
+      灵敏度 <input type="range" id="sens" min="0.25" max="3" step="0.1" value="1.0" />
+      <span id="sensVal" style="min-width:30px;text-align:center;">1.0</span>
     </div>
     <button id="btnLock" class="small">拖动锁:关</button>
   </div>
@@ -141,7 +141,7 @@
 
   <div id="pad">
     <div id="padHints">
-      <div>单指滑动 = 移动鼠标</div>
+      <div>单指滑动 = 移动鼠标（相对模式，像真实触摸板）</div>
       <div>单击 = 左键 · 双指点击 = 右键</div>
       <div>双指上下滑 = 滚轮</div>
     </div>
@@ -160,8 +160,8 @@
   'use strict';
   var ws = null;
   var bounds = null;
-  var mode = 'abs';          // abs | rel
-  var sens = 1.5;
+  var mode = 'rel';          // abs | rel（默认相对，像真实触摸板）
+  var sens = 1.0;
   var dragLock = false;
   var dragLockDown = false;
   var touches = new Map();
@@ -172,6 +172,42 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var pad = $('pad');
+
+  // rAF 每帧合并发送：一帧只发一次最新位置，避免事件洪泛造成积压和拖尾
+  var rafPending = false;
+  var lastAbs = null;
+  var accDx = 0, accDy = 0;
+  var padW = 0, padH = 0;
+
+  function updatePadSize() { padW = pad.clientWidth; padH = pad.clientHeight; }
+  window.addEventListener('resize', updatePadSize);
+
+  function scheduleAbs(x, y) {
+    lastAbs = { x: x, y: y };
+    flushMoves();
+  }
+  function scheduleRel(dx, dy) {
+    accDx += dx * sens;
+    accDy += dy * sens;
+    flushMoves();
+  }
+  function flushMoves() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(function () {
+      rafPending = false;
+      if (lastAbs) {
+        var p = lastAbs;
+        lastAbs = null;
+        sendAbs(p.x, p.y);
+      }
+      if (accDx || accDy) {
+        var x = Math.round(accDx), y = Math.round(accDy);
+        accDx = 0; accDy = 0;
+        if (x || y) send({ t: 'r', dx: x, dy: y });
+      }
+    });
+  }
 
   function send(m) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
@@ -208,7 +244,7 @@
 
   function sendAbs(px, py) {
     if (!bounds || bounds.w <= 0 || bounds.h <= 0) return;
-    var padW = pad.clientWidth, padH = pad.clientHeight;
+    if (!padW || !padH) updatePadSize();
     var scale = Math.min(padW / bounds.w, padH / bounds.h);
     var ox = (padW - scale * bounds.w) / 2;
     var oy = (padH - scale * bounds.h) / 2;
@@ -217,6 +253,7 @@
 
   pad.addEventListener('touchstart', function (e) {
     e.preventDefault();
+    updatePadSize();
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
       touches.set(t.identifier, { x: t.clientX, y: t.clientY });
@@ -246,11 +283,11 @@
         if (Math.hypot(st.x - tapCandidate.x, st.y - tapCandidate.y) > 8) tapCandidate.moved = true;
       }
       if (mode === 'abs') {
-        sendAbs(st.x, st.y);
+        scheduleAbs(st.x, st.y);
       } else if (relPrev) {
         var dx = st.x - relPrev.x, dy = st.y - relPrev.y;
         relPrev = { x: st.x, y: st.y };
-        if (dx || dy) send({ t: 'r', dx: Math.round(dx * sens), dy: Math.round(dy * sens) });
+        if (dx || dy) scheduleRel(dx, dy);
       }
     } else if (touches.size === 2 && twoFinger) {
       var arr = Array.from(touches.values());
@@ -315,7 +352,7 @@
 
   $('sens').oninput = function () {
     sens = parseFloat(this.value);
-    $('sensVal').textContent = sens.toFixed(2);
+    $('sensVal').textContent = sens.toFixed(1);
   };
 
   $('btnLock').onclick = function () {

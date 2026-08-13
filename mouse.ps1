@@ -22,8 +22,14 @@ Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 public static class MouseWin {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X; public int Y; }
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT p);
 }
 "@
 
@@ -46,7 +52,7 @@ function Clamp([double]$v, [double]$min, [double]$max) {
 function Set-Pos([int]$x, [int]$y) {
     $x = [int](Clamp $x $BX ($BX + $BW - 1))
     $y = [int](Clamp $y $BY ($BY + $BH - 1))
-    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+    [MouseWin]::SetCursorPos($x, $y) | Out-Null
 }
 
 function Send-Key([string]$text) {
@@ -92,7 +98,7 @@ while ($true) {
     $cmd = $line[0]
     switch ($cmd) {
         'M' { # M x y
-            $parts = $line.Substring(1).Trim() -split '\s+'
+            $parts = $line.Substring(1).Trim().Split(' ')
             Set-Pos ([int]$parts[0]) ([int]$parts[1])
             break
         }
@@ -101,8 +107,9 @@ while ($true) {
             elseif($line -eq 'RU') { [MouseWin]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
             elseif($line -eq 'RC') { [MouseWin]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero); [MouseWin]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero) }
             else { # 相对移动（读光标+偏移，完全无加速）
-                $parts = $line.Substring(1).Trim() -split '\s+'
-                $p = [System.Windows.Forms.Cursor]::Position
+                $parts = $line.Substring(1).Trim().Split(' ')
+                $p = [MouseWin+POINT]::new()
+                [MouseWin]::GetCursorPos([ref]$p) | Out-Null
                 Set-Pos ($p.X + [int]$parts[0]) ($p.Y + [int]$parts[1])
             }
             break

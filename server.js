@@ -313,10 +313,10 @@ function tickScroll(c) {
     if (s.ramp <= 0) { stopScroll(c, true); return; }
   }
   const speed = (c.wspeed || 3) * s.ramp;     // 格/秒（1 格 = 120）
-  s.phase += speed * 16 / 1000;
+  s.phase += speed * 4 * 16 / 1000;           // 每格拆成 4 个细增量
   while (s.phase >= 1) {
     s.phase -= 1;
-    mouseCmd('W ' + (s.dir === 'up' ? 120 : -120));
+    mouseCmd('W ' + (s.dir === 'up' ? 30 : -30)); // 30 = 1/4 格，步幅更细腻
   }
 }
 
