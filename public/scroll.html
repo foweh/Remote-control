@@ -34,45 +34,41 @@
   .dot.on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.7); }
   #latency { margin-left: auto; color: #818cf8; font-variant-numeric: tabular-nums; }
 
-  /* 两个大箭头 */
-  .arrow {
+  /* 上下两个半屏大分区 */
+  .zone {
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 88px;
-    font-weight: 700;
     cursor: pointer;
-    transition: background .12s, transform .06s;
     -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+    transition: background .12s;
   }
-  .arrow .inner {
-    width: 100%;
-    height: 100%;
+  .zone .zinner {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    border-radius: 28px;
-    margin: 10px;
-    transition: background .12s, transform .06s;
+    gap: 6px;
+    font-size: 72px;
+    font-weight: 700;
+    opacity: 0.35;
+    transition: all .12s;
   }
-  .arrow.up   { color: #818cf8; }
-  .arrow.down { color: #f87171; }
-  .arrow.up .inner   { background: rgba(79, 70, 229, 0.10); }
-  .arrow.down .inner { background: rgba(239, 68, 68, 0.08); }
-  .arrow.up.pressed .inner {
-    background: rgba(79, 70, 229, 0.45);
-    transform: scale(0.97);
-    box-shadow: 0 0 40px rgba(79, 70, 229, 0.35) inset;
+  .zone .zsub { font-size: 13px; font-weight: 400; }
+  .zone.up   { color: #818cf8; background: rgba(79, 70, 229, 0.05); }
+  .zone.down { color: #f87171; background: rgba(239, 68, 68, 0.04); }
+  .zone.up.pressed {
+    background: rgba(79, 70, 229, 0.35);
+    box-shadow: 0 0 60px rgba(79, 70, 229, 0.35) inset;
   }
-  .arrow.down.pressed .inner {
-    background: rgba(239, 68, 68, 0.40);
-    transform: scale(0.97);
-    box-shadow: 0 0 40px rgba(239, 68, 68, 0.30) inset;
+  .zone.down.pressed {
+    background: rgba(239, 68, 68, 0.30);
+    box-shadow: 0 0 60px rgba(239, 68, 68, 0.30) inset;
   }
-  .arrow .sub { font-size: 13px; font-weight: 400; opacity: 0.55; margin-left: 14px; }
+  .zone.pressed .zinner { opacity: 1; transform: scale(1.06); }
 
-  /* 中间/底部速度滑块：小药丸 */
+  /* 底部速度滑块：小药丸 */
   #speedPill {
     flex-shrink: 0;
     display: flex;
@@ -80,14 +76,12 @@
     justify-content: center;
     gap: 12px;
     background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 30px;
-    margin: 0 auto 12px;
-    padding: 8px 20px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 10px 20px 14px;
     font-size: 13px;
     color: #999;
   }
-  #speedPill input { width: 160px; accent-color: #4f46e5; }
+  #speedPill input { width: 170px; accent-color: #4f46e5; }
   #speedVal {
     min-width: 40px;
     text-align: center;
@@ -105,18 +99,18 @@
     <span id="latency">--</span>
   </div>
 
-  <div class="arrow up" id="btnUp">
-    <div class="inner">▲<span class="sub">按住上滚</span></div>
+  <div class="zone up" id="zoneUp">
+    <div class="zinner">▲<span class="zsub">按住上滚</span></div>
+  </div>
+
+  <div class="zone down" id="zoneDown">
+    <div class="zinner">▼<span class="zsub">按住下滚</span></div>
   </div>
 
   <div id="speedPill">
     速度
     <input type="range" id="speed" min="1" max="10" step="1" value="3" />
     <span id="speedVal">3</span>
-  </div>
-
-  <div class="arrow down" id="btnDown">
-    <div class="inner">▼<span class="sub">按住下滚</span></div>
   </div>
 
 <script>
@@ -160,47 +154,55 @@
     }, 2000);
   }
 
-  // ---------- 按住 = 开始滚动，松手 = 停止（滚动循环在电脑端跑，网络抖动不影响丝滑） ----------
-  function press(dir, btn) {
+  // ---------- 上半屏 = 上滚，下半屏 = 下滚；按住即滚，手指滑到另一半自动换向 ----------
+  function zoneOf(t) {
+    var r = $('zoneUp').getBoundingClientRect();
+    return t.clientY <= r.bottom ? 'up' : 'down';
+  }
+
+  function press(dir) {
     if (active === dir) return;
-    if (active) release(active);          // 按住另一个箭头时先停掉旧的
+    if (active) $('zone' + active[0].toUpperCase() + active.slice(1)).classList.remove('pressed');
     active = dir;
-    btn.classList.add('pressed');
-    send({ t: 'scrollStart', dir: dir });
+    $('zone' + dir[0].toUpperCase() + dir.slice(1)).classList.add('pressed');
+    send({ t: 'scrollStart', dir: dir }); // 已在滚动时服务端会直接换向，无缝衔接
     if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
   }
 
-  function release(dir) {
-    if (active !== dir) return;
+  function release() {
+    if (!active) return;
+    var dir = active;
     active = null;
-    var btn = dir === 'up' ? $('btnUp') : $('btnDown');
-    btn.classList.remove('pressed');
+    $('zone' + dir[0].toUpperCase() + dir.slice(1)).classList.remove('pressed');
     send({ t: 'scrollStop' });
   }
 
-  function bind(btn, dir) {
-    btn.addEventListener('touchstart', function (e) { e.preventDefault(); press(dir, btn); }, { passive: false });
-    btn.addEventListener('touchend', function (e) { e.preventDefault(); release(dir); }, { passive: false });
-    btn.addEventListener('touchcancel', function () { release(dir); });
-    btn.addEventListener('mousedown', function (e) { e.preventDefault(); press(dir, btn); });
-    btn.addEventListener('mouseup', function () { release(dir); });
-    btn.addEventListener('mouseleave', function () { release(dir); });
-    btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  function bindZone(zone, dir) {
+    zone.addEventListener('touchstart', function (e) { e.preventDefault(); press(dir); }, { passive: false });
+    zone.addEventListener('mousedown', function (e) { e.preventDefault(); press(dir); });
+    zone.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   }
-  bind($('btnUp'), 'up');
-  bind($('btnDown'), 'down');
+  bindZone($('zoneUp'), 'up');
+  bindZone($('zoneDown'), 'down');
+
+  // 按住时手指滑到另一半 → 自动切换方向
+  document.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    if (!active || e.touches.length === 0) return;
+    var d = zoneOf(e.touches[0]);
+    if (d !== active) press(d);
+  }, { passive: false });
+
+  document.addEventListener('touchend', function () { release(); });
+  document.addEventListener('touchcancel', function () { release(); });
+  document.addEventListener('mouseup', function () { release(); });
 
   // 页面切后台/锁屏 = 强制停止，防止一直滚
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden && active) {
-      active = null;
-      $('btnUp').classList.remove('pressed');
-      $('btnDown').classList.remove('pressed');
-      send({ t: 'scrollStop' });
-    }
+    if (document.hidden) release();
   });
 
-  // ---------- 速度滑块（1-10，手机上手边可调） ----------
+  // ---------- 速度滑块（1-10，手机上实时可调） ----------
   $('speed').oninput = function () {
     speed = parseInt(this.value, 10);
     $('speedVal').textContent = speed;
