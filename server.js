@@ -259,8 +259,11 @@ function handleMessage(c, m) {
       mouseCmd('P');
       break;
     case 'm': { // 绝对移动（0..1 归一化）
-      const x = Math.round(bounds.x + Math.min(1, Math.max(0, +m.x || 0)) * bounds.w);
-      const y = Math.round(bounds.y + Math.min(1, Math.max(0, +m.y || 0)) * bounds.h);
+      // 类型校验：非数字输入直接忽略，绝不把光标拽到屏幕角落
+      if (typeof m.x !== 'number' || typeof m.y !== 'number' ||
+          !Number.isFinite(m.x) || !Number.isFinite(m.y)) break;
+      const x = Math.round(bounds.x + Math.min(1, Math.max(0, m.x)) * bounds.w);
+      const y = Math.round(bounds.y + Math.min(1, Math.max(0, m.y)) * bounds.h);
       mouseCmd(`M ${x} ${y}`);
       break;
     }
