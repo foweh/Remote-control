@@ -301,13 +301,16 @@ function handleMessage(c, m) {
 
 // ---------------- 服务端滚轮循环（长按缓慢起滚：1.5s 缓动入 / 100ms 渐出） ----------------
 function startScroll(c, dir) {
-  if (c.scroll) { // 已激活：仅切换方向、取消渐出
+  if (c.scroll) { // 已激活：仅切换方向、取消渐出，并立即反馈一格
     c.scroll.dir = dir;
     c.scroll.out = false;
+    mouseCmd('W ' + (dir === 'up' ? 120 : -120));
     return;
   }
   c.scroll = { dir, ramp: 0, phase: 0, out: false };
   c.scroll.timer = setInterval(() => tickScroll(c), 16);
+  // 按下立刻滚一格：零延迟反馈，不等缓动攒格（希沃等软件只认整格 120）
+  mouseCmd('W ' + (dir === 'up' ? 120 : -120));
 }
 
 function tickScroll(c) {
@@ -321,10 +324,10 @@ function tickScroll(c) {
   }
   const target = c.wspeed || 3;               // 滑块目标速度（格/秒）
   const speed = 0.25 + (target - 0.25) * s.ramp; // 起步仅 0.25 格/秒，缓慢精细可控
-  s.phase += speed * 4 * 16 / 1000;           // 每格拆成 4 个细增量
+  s.phase += speed * 16 / 1000;               // 整格累计（1 格 = 120，所有软件通用）
   while (s.phase >= 1) {
     s.phase -= 1;
-    mouseCmd('W ' + (s.dir === 'up' ? 30 : -30));
+    mouseCmd('W ' + (s.dir === 'up' ? 120 : -120));
   }
 }
 

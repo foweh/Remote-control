@@ -141,9 +141,9 @@
 
   <div id="pad">
     <div id="padHints">
-      <div>单指滑动 = 移动鼠标（相对模式，像真实触摸板）</div>
-      <div>单击 = 左键 · 双指点击 = 右键</div>
-      <div>双指上下滑 = 滚轮</div>
+      <div>单指滑动 = 移动鼠标 · 长按 = 右键</div>
+      <div>单击 = 左键 · 双击第二下按住拖动 = 拖拽</div>
+      <div>双指点击 = 右键 · 双指上下滑 = 滚轮</div>
     </div>
   </div>
 
@@ -168,6 +168,11 @@
   var tapCandidate = null;
   var twoFinger = null;
   var relPrev = null;
+  var pendingTap = 0;   // 首次点按时间戳，用于识别双击第二下
+  var secondTap = false;
+  var dragActive = false; // 双击第二下按住拖动 = 拖拽
+  var longTimer = null;
+  var longFired = false;  // 长按已发右键
   var pingTimer = null;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -260,9 +265,22 @@
     }
     if (touches.size === 1) {
       var t0 = e.changedTouches[0];
-      tapCandidate = { x: t0.clientX, y: t0.clientY, t: Date.now(), moved: false };
+      var now = Date.now();
+      secondTap = pendingTap !== 0 && (now - pendingTap) < 320; // 双击第二下
+      dragActive = false;
+      longFired = false;
+      tapCandidate = { x: t0.clientX, y: t0.clientY, t: now, moved: false };
       relPrev = { x: t0.clientX, y: t0.clientY };
+      clearTimeout(longTimer);
+      longTimer = setTimeout(function () {
+        // 长按 550ms = 右键（希沃/Windows 触摸惯例）
+        if (touches.size === 1 && tapCandidate && !tapCandidate.moved && !dragActive && !dragLock) {
+          longFired = true;
+          send({ t: 'rc' });
+        }
+      }, 550);
     } else if (touches.size === 2) {
+      clearTimeout(longTimer);
       tapCandidate = null;
       var arr = Array.from(touches.values());
       twoFinger = { lastY: (arr[0].y + arr[1].y) / 2, moved: 0, t: Date.now() };
@@ -280,7 +298,15 @@
     if (touches.size === 1) {
       var st = Array.from(touches.values())[0];
       if (tapCandidate) {
-        if (Math.hypot(st.x - tapCandidate.x, st.y - tapCandidate.y) > 8) tapCandidate.moved = true;
+        if (Math.hypot(st.x - tapCandidate.x, st.y - tapCandidate.y) > 8) {
+          tapCandidate.moved = true;
+          clearTimeout(longTimer);
+          if (secondTap && !dragActive) {
+            // 双击第二下按住拖动 = 拖拽
+            dragActive = true;
+            send({ t: 'ld' });
+          }
+        }
       }
       if (mode === 'abs') {
         scheduleAbs(st.x, st.y);
@@ -305,13 +331,21 @@
       touches.delete(e.changedTouches[i].identifier);
     }
     if (touches.size === 0) {
-      if (tapCandidate && !tapCandidate.moved && Date.now() - tapCandidate.t < 300) {
+      clearTimeout(longTimer);
+      if (dragActive) {
+        // 双击拖动结束：松手 = 松开左键
+        dragActive = false;
+        send({ t: 'lu' });
+      } else if (longFired) {
+        // 长按已发右键，松手不再发左键
+      } else if (tapCandidate && !tapCandidate.moved && Date.now() - tapCandidate.t < 300) {
         if (dragLock) {
           dragLockDown = !dragLockDown;
           send(dragLockDown ? { t: 'ld' } : { t: 'lu' });
           updateLockBtn();
         } else {
           send({ t: 'lc' });
+          pendingTap = secondTap ? 0 : Date.now(); // 记录首击，等待双击第二下
         }
       }
       if (twoFinger && twoFinger.moved < 12 && Date.now() - twoFinger.t < 300) {
@@ -328,6 +362,7 @@
   }, { passive: false });
 
   pad.addEventListener('touchcancel', function (e) {
+    clearTimeout(longTimer);
     touches.clear();
     tapCandidate = null;
     twoFinger = null;
