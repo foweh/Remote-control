@@ -28,7 +28,10 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8642.*LISTENING"') do (
 ping -n 2 127.0.0.1 >nul
 
 echo [2/3] Starting server ...
-start "" /B node server.js
+REM prefer the bundled node.exe (portable, no install needed); fall back to system node
+set "NODE=node"
+if exist "%~dp0runtime\node.exe" set "NODE=%~dp0runtime\node.exe"
+start "" /B "%NODE%" server.js
 ping -n 3 127.0.0.1 >nul
 
 echo [3/3] Opening control page ...
