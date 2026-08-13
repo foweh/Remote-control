@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>触摸板控制</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+    background: #0f0f1a;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #aaa;
+    flex-shrink: 0;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #f87171; flex-shrink: 0; }
+  .dot.on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.7); }
+  #latency { margin-left: auto; color: #818cf8; font-variant-numeric: tabular-nums; }
+  .btnrow {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px;
+    flex-shrink: 0;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  button {
+    background: rgba(255,255,255,0.08);
+    border: none;
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .15s, transform .05s;
+  }
+  button:active { transform: scale(0.94); background: rgba(79,70,229,0.5); }
+  button.active { background: #4f46e5; }
+  button.small { padding: 10px 12px; }
+  .sens-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.05);
+    padding: 6px 12px;
+    border-radius: 14px;
+    font-size: 12px;
+    color: #aaa;
+    transition: opacity .2s;
+  }
+  .sens-wrap input { width: 90px; accent-color: #4f46e5; }
+  #pad {
+    flex: 1;
+    margin: 8px 12px 12px;
+    border-radius: 20px;
+    background:
+      radial-gradient(circle at 50% 45%, rgba(79,70,229,0.10), transparent 70%),
+      rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    touch-action: none;
+    position: relative;
+  }
+  #padHints {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #555;
+    font-size: 13px;
+    pointer-events: none;
+    text-align: center;
+    line-height: 1.8;
+  }
+  #kbdPanel {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: #171724;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding: 14px;
+    z-index: 10;
+  }
+  #kbdText {
+    width: 100%;
+    height: 90px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    color: #fff;
+    font-size: 16px;
+    padding: 10px;
+    resize: none;
+    outline: none;
+  }
+  .kbd-actions { display: flex; gap: 10px; margin-top: 10px; }
+  .kbd-actions button { flex: 1; padding: 12px; font-size: 15px; }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <span class="dot" id="dot"></span>
+    <span id="status">连接中…</span>
+    <span id="latency">--</span>
+  </div>
+
+  <div class="btnrow">
+    <button id="btnMode">绝对模式</button>
+    <div class="sens-wrap" id="sensWrap">
+      灵敏度 <input type="range" id="sens" min="0.5" max="4" step="0.25" value="1.5" />
+      <span id="sensVal" style="min-width:30px;text-align:center;">1.5</span>
+    </div>
+    <button id="btnLock" class="small">拖动锁:关</button>
+  </div>
+
+  <div class="btnrow">
+    <button id="btnLC">🖱️ 左键</button>
+    <button id="btnRC">右键</button>
+    <button id="btnWU" class="small">▲滚</button>
+    <button id="btnWD" class="small">▼滚</button>
+    <button id="btnKbd" class="small">⌨️</button>
+  </div>
+
+  <div id="pad">
+    <div id="padHints">
+      <div>单指滑动 = 移动鼠标</div>
+      <div>单击 = 左键 · 双指点击 = 右键</div>
+      <div>双指上下滑 = 滚轮</div>
+    </div>
+  </div>
+
+  <div id="kbdPanel" style="display:none">
+    <textarea id="kbdText" placeholder="输入要发送到电脑的文字…"></textarea>
+    <div class="kbd-actions">
+      <button id="kbdSend" style="background:#4f46e5;">发送到电脑</button>
+      <button id="kbdClose">关闭</button>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+  var ws = null;
+  var bounds = null;
+  var mode = 'abs';          // abs | rel
+  var sens = 1.5;
+  var dragLock = false;
+  var dragLockDown = false;
+  var touches = new Map();
+  var tapCandidate = null;
+  var twoFinger = null;
+  var relPrev = null;
+  var pingTimer = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var pad = $('pad');
+
+  function send(m) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+  }
+  function setStatus(ok, text) {
+    $('dot').className = 'dot' + (ok ? ' on' : '');
+    $('status').textContent = text;
+  }
+
+  function connect() {
+    ws = new WebSocket('ws://' + location.host + '/ws?page=control');
+    ws.onopen = function () { setStatus(true, '已连接'); };
+    ws.onmessage = function (ev) {
+      var m;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === 'bounds') bounds = m;
+      else if (m.t === 'pong' && typeof m.ts === 'number') {
+        $('latency').textContent = Math.max(0, Math.round(performance.now() - m.ts)) + ' ms';
+      }
+    };
+    ws.onclose = function () { setStatus(false, '断开，重连中…'); setTimeout(connect, 2000); };
+    ws.onerror = function () {};
+  }
+
+  // 每 2 秒 ping 一次，测完整链路（手机→服务器→鼠标驱动→回来）延迟
+  function startPing() {
+    pingTimer = setInterval(function () {
+      send({ t: 'ping', ts: performance.now() });
+    }, 2000);
+  }
+
+  // ---------- 触摸板 ----------
+  function clamp01(v) { return Math.min(1, Math.max(0, v)); }
+
+  function sendAbs(px, py) {
+    if (!bounds || bounds.w <= 0 || bounds.h <= 0) return;
+    var padW = pad.clientWidth, padH = pad.clientHeight;
+    var scale = Math.min(padW / bounds.w, padH / bounds.h);
+    var ox = (padW - scale * bounds.w) / 2;
+    var oy = (padH - scale * bounds.h) / 2;
+    send({ t: 'm', x: clamp01((px - ox) / (scale * bounds.w)), y: clamp01((py - oy) / (scale * bounds.h)) });
+  }
+
+  pad.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+    }
+    if (touches.size === 1) {
+      var t0 = e.changedTouches[0];
+      tapCandidate = { x: t0.clientX, y: t0.clientY, t: Date.now(), moved: false };
+      relPrev = { x: t0.clientX, y: t0.clientY };
+    } else if (touches.size === 2) {
+      tapCandidate = null;
+      var arr = Array.from(touches.values());
+      twoFinger = { lastY: (arr[0].y + arr[1].y) / 2, moved: 0, t: Date.now() };
+    }
+  }, { passive: false });
+
+  pad.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      if (touches.has(t.identifier)) {
+        touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+    }
+    if (touches.size === 1) {
+      var st = Array.from(touches.values())[0];
+      if (tapCandidate) {
+        if (Math.hypot(st.x - tapCandidate.x, st.y - tapCandidate.y) > 8) tapCandidate.moved = true;
+      }
+      if (mode === 'abs') {
+        sendAbs(st.x, st.y);
+      } else if (relPrev) {
+        var dx = st.x - relPrev.x, dy = st.y - relPrev.y;
+        relPrev = { x: st.x, y: st.y };
+        if (dx || dy) send({ t: 'r', dx: Math.round(dx * sens), dy: Math.round(dy * sens) });
+      }
+    } else if (touches.size === 2 && twoFinger) {
+      var arr = Array.from(touches.values());
+      var midY = (arr[0].y + arr[1].y) / 2;
+      var dy = midY - twoFinger.lastY;
+      twoFinger.lastY = midY;
+      twoFinger.moved += Math.abs(dy);
+      if (dy) send({ t: 'w', d: Math.round(-dy * 3) }); // 手指上滑 = 滚轮向上
+    }
+  }, { passive: false });
+
+  pad.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      touches.delete(e.changedTouches[i].identifier);
+    }
+    if (touches.size === 0) {
+      if (tapCandidate && !tapCandidate.moved && Date.now() - tapCandidate.t < 300) {
+        if (dragLock) {
+          dragLockDown = !dragLockDown;
+          send(dragLockDown ? { t: 'ld' } : { t: 'lu' });
+          updateLockBtn();
+        } else {
+          send({ t: 'lc' });
+        }
+      }
+      if (twoFinger && twoFinger.moved < 12 && Date.now() - twoFinger.t < 300) {
+        send({ t: 'rc' });
+      }
+      tapCandidate = null;
+      twoFinger = null;
+      relPrev = null;
+    }
+  }, { passive: false });
+
+  pad.addEventListener('touchcancel', function (e) {
+    touches.clear();
+    tapCandidate = null;
+    twoFinger = null;
+    relPrev = null;
+  });
+  pad.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // ---------- 按钮 ----------
+  function updateLockBtn() {
+    var b = $('btnLock');
+    b.textContent = dragLock ? (dragLockDown ? '拖动锁:按住中' : '拖动锁:开') : '拖动锁:关';
+    b.classList.toggle('active', dragLock);
+  }
+
+  $('btnLC').onclick = function () { send({ t: 'lc' }); };
+  $('btnRC').onclick = function () { send({ t: 'rc' }); };
+  $('btnWU').onclick = function () { send({ t: 'w', d: 120 }); };
+  $('btnWD').onclick = function () { send({ t: 'w', d: -120 }); };
+
+  $('btnMode').onclick = function () {
+    mode = mode === 'abs' ? 'rel' : 'abs';
+    this.textContent = mode === 'abs' ? '绝对模式' : '相对模式';
+    this.classList.toggle('active', mode === 'rel');
+    $('sensWrap').style.opacity = mode === 'rel' ? '1' : '0.35';
+  };
+
+  $('sens').oninput = function () {
+    sens = parseFloat(this.value);
+    $('sensVal').textContent = sens.toFixed(2);
+  };
+
+  $('btnLock').onclick = function () {
+    dragLock = !dragLock;
+    dragLockDown = false;
+    updateLockBtn();
+  };
+
+  $('btnKbd').onclick = function () {
+    var p = $('kbdPanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    if (p.style.display === 'block') $('kbdText').focus();
+  };
+  $('kbdSend').onclick = function () {
+    var t = $('kbdText').value;
+    if (t) send({ t: 'k', text: t });
+    $('kbdText').value = '';
+    $('kbdPanel').style.display = 'none';
+  };
+  $('kbdClose').onclick = function () {
+    $('kbdPanel').style.display = 'none';
+  };
+
+  connect();
+  startPing();
+})();
+</script>
+</body>
+</html>

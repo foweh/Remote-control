@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>mouse-ctrl-v3 · 手机控制电脑鼠标</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #0f0f1a;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 48px;
+  }
+  h1 { font-size: 26px; font-weight: 600; margin-bottom: 6px; }
+  .sub { color: #888; font-size: 14px; margin-bottom: 24px; text-align: center; line-height: 1.7; }
+
+  .cards { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+  .card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 24px;
+    width: 320px;
+    text-align: center;
+    transition: border-color .2s;
+  }
+  .card:hover { border-color: rgba(79,70,229,0.5); }
+  .card h2 { font-size: 18px; margin-bottom: 4px; }
+  .card .desc { color: #999; font-size: 13px; margin-bottom: 16px; }
+  .qr-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px;
+    display: inline-block;
+    line-height: 0;
+  }
+  .qr-box canvas, .qr-box img { border-radius: 4px; }
+  .url-text {
+    margin-top: 14px;
+    font-size: 12px;
+    color: #818cf8;
+    word-break: break-all;
+    user-select: all;
+  }
+
+  .ip-bar { margin-top: 28px; text-align: center; }
+  .ip-bar .label { color: #aaa; font-size: 13px; margin-bottom: 10px; }
+  .ip-btn {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #ccc;
+    padding: 7px 16px;
+    margin: 4px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all .15s;
+  }
+  .ip-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+  .ip-btn.active { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+
+  .status { margin-top: 24px; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+  .chip {
+    background: rgba(255,255,255,0.05);
+    border-radius: 20px;
+    padding: 8px 18px;
+    font-size: 13px;
+    color: #aaa;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; }
+  .dot.on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.7); }
+  .dot.warn { background: #f87171; }
+</style>
+</head>
+<body>
+  <h1>🖱️ 手机控制电脑鼠标</h1>
+  <div class="sub">
+    手机和电脑连同一个 WiFi，用手机扫下面任意一个二维码即可控制<br />
+    首次运行若弹出防火墙提示，请勾选「专用网络」并允许访问
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h2>🎮 触摸板控制</h2>
+      <div class="desc">手机当触摸板：移动 / 左键 / 右键 / 滚轮 / 键盘输入</div>
+      <div class="qr-box"><div id="qrControl"></div></div>
+      <div class="url-text" id="urlControl"></div>
+    </div>
+    <div class="card">
+      <h2>🔼🔽 滚轮遥控</h2>
+      <div class="desc">只有上下两个箭头：按住连续丝滑滚动，速度可调</div>
+      <div class="qr-box"><div id="qrScroll"></div></div>
+      <div class="url-text" id="urlScroll"></div>
+    </div>
+  </div>
+
+  <div class="ip-bar">
+    <div class="label">二维码使用的局域网地址（多网卡时手动切换）</div>
+    <div id="ipButtons"></div>
+  </div>
+
+  <div class="status">
+    <div class="chip"><span class="dot" id="dotSrv"></span><span id="txtSrv">服务器状态</span></div>
+    <div class="chip"><span class="dot" id="dotDriver"></span><span id="txtDriver">鼠标驱动</span></div>
+    <div class="chip">📱 已连接手机：<span id="txtPhones">0</span></div>
+    <div class="chip" id="phonePages" style="display:none"></div>
+  </div>
+
+  <script src="qrcode.min.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var port = 8642;
+    var ips = [];
+    var currentIp = null;
+    var qrControl = null, qrScroll = null;
+    var ws = null;
+
+    var $ = function (id) { return document.getElementById(id); };
+
+    function makeQR(el, url) {
+      if (!qrControl) return;
+      qrControl.clear(); qrScroll.clear();
+      qrControl.makeCode(url + '/control.html');
+      qrScroll.makeCode(url + '/scroll.html');
+      $('urlControl').textContent = url + '/control.html';
+      $('urlScroll').textContent = url + '/scroll.html';
+    }
+
+    function selectIp(ip) {
+      currentIp = ip;
+      try { localStorage.setItem('mousectrl_ip', ip); } catch (e) {}
+      var btns = document.querySelectorAll('.ip-btn');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('active', btns[i].textContent === ip);
+      }
+      makeQR('http://' + ip + ':' + port);
+    }
+
+    function renderIpButtons() {
+      var box = $('ipButtons');
+      box.innerHTML = '';
+      var list = ips.slice();
+      if (list.indexOf('localhost') < 0) list.push('localhost');
+      for (var i = 0; i < list.length; i++) {
+        (function (ip) {
+          var b = document.createElement('button');
+          b.className = 'ip-btn';
+          b.textContent = ip;
+          b.onclick = function () { selectIp(ip); };
+          box.appendChild(b);
+        })(list[i]);
+      }
+    }
+
+    function connectWS() {
+      ws = new WebSocket('ws://' + location.host + '/ws?page=index');
+      ws.onopen = function () {
+        setDot('dotSrv', 'on');
+        $('txtSrv').textContent = '服务器在线';
+      };
+      ws.onmessage = function (ev) {
+        var m;
+        try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (m.t === 'clients') {
+          $('txtPhones').textContent = m.n;
+          var chip = $('phonePages');
+          if (m.n > 0) {
+            var pages = [];
+            for (var i = 0; i < m.phones.length; i++) {
+              pages.push(m.phones[i].page === 'scroll' ? '🔼🔽滚轮' : '🎮触摸板');
+            }
+            chip.textContent = '正在控制：' + pages.join('、');
+            chip.style.display = '';
+          } else {
+            chip.style.display = 'none';
+          }
+        } else if (m.t === 'driverReady') {
+          setDot('dotDriver', 'on');
+          $('txtDriver').textContent = '驱动就绪';
+        }
+      };
+      ws.onclose = function () {
+        setDot('dotSrv', 'warn');
+        $('txtSrv').textContent = '连接断开，重连中…';
+        setTimeout(connectWS, 2000);
+      };
+      ws.onerror = function () {};
+    }
+
+    function setDot(id, cls) {
+      var d = $(id);
+      d.className = 'dot ' + cls;
+    }
+
+    fetch('/info').then(function (r) { return r.json(); }).then(function (info) {
+      port = info.port;
+      ips = info.ips;
+      if (ips.length === 0) ips = ['本机IP未找到'];
+      renderIpButtons();
+      qrControl = new QRCode($('qrControl'), { width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+      qrScroll  = new QRCode($('qrScroll'),  { width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+      var saved = null;
+      try { saved = localStorage.getItem('mousectrl_ip'); } catch (e) {}
+      var pick = (saved && ips.indexOf(saved) >= 0) ? saved : ips[0];
+      selectIp(pick);
+      connectWS();
+    }).catch(function () {
+      $('txtSrv').textContent = '获取信息失败';
+    });
+  })();
+  </script>
+</body>
+</html>

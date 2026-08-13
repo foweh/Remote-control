@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>滚轮遥控</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+    background: #0f0f1a;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* 顶部状态条：极简，只占一行 */
+  #statusbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    color: #666;
+    flex-shrink: 0;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #f87171; flex-shrink: 0; }
+  .dot.on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.7); }
+  #latency { margin-left: auto; color: #818cf8; font-variant-numeric: tabular-nums; }
+
+  /* 两个大箭头 */
+  .arrow {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 88px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .12s, transform .06s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .arrow .inner {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 28px;
+    margin: 10px;
+    transition: background .12s, transform .06s;
+  }
+  .arrow.up   { color: #818cf8; }
+  .arrow.down { color: #f87171; }
+  .arrow.up .inner   { background: rgba(79, 70, 229, 0.10); }
+  .arrow.down .inner { background: rgba(239, 68, 68, 0.08); }
+  .arrow.up.pressed .inner {
+    background: rgba(79, 70, 229, 0.45);
+    transform: scale(0.97);
+    box-shadow: 0 0 40px rgba(79, 70, 229, 0.35) inset;
+  }
+  .arrow.down.pressed .inner {
+    background: rgba(239, 68, 68, 0.40);
+    transform: scale(0.97);
+    box-shadow: 0 0 40px rgba(239, 68, 68, 0.30) inset;
+  }
+  .arrow .sub { font-size: 13px; font-weight: 400; opacity: 0.55; margin-left: 14px; }
+
+  /* 中间/底部速度滑块：小药丸 */
+  #speedPill {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 30px;
+    margin: 0 auto 12px;
+    padding: 8px 20px;
+    font-size: 13px;
+    color: #999;
+  }
+  #speedPill input { width: 160px; accent-color: #4f46e5; }
+  #speedVal {
+    min-width: 40px;
+    text-align: center;
+    font-weight: 600;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+  <div id="statusbar">
+    <span class="dot" id="dot"></span>
+    <span id="status">连接中…</span>
+    <span id="latency">--</span>
+  </div>
+
+  <div class="arrow up" id="btnUp">
+    <div class="inner">▲<span class="sub">按住上滚</span></div>
+  </div>
+
+  <div id="speedPill">
+    速度
+    <input type="range" id="speed" min="1" max="10" step="1" value="3" />
+    <span id="speedVal">3</span>
+  </div>
+
+  <div class="arrow down" id="btnDown">
+    <div class="inner">▼<span class="sub">按住下滚</span></div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+  var ws = null;
+  var speed = 3;
+  var active = null; // 'up' | 'down' | null
+  var pingTimer = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function send(m) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+  }
+  function setStatus(ok, text) {
+    $('dot').className = 'dot' + (ok ? ' on' : '');
+    $('status').textContent = text;
+  }
+
+  function connect() {
+    ws = new WebSocket('ws://' + location.host + '/ws?page=scroll');
+    ws.onopen = function () {
+      setStatus(true, '已连接');
+      send({ t: 'wset', v: speed }); // 连接后同步当前速度
+    };
+    ws.onmessage = function (ev) {
+      var m;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === 'pong' && typeof m.ts === 'number') {
+        $('latency').textContent = Math.max(0, Math.round(performance.now() - m.ts)) + ' ms';
+      }
+    };
+    ws.onclose = function () { setStatus(false, '断开，重连中…'); setTimeout(connect, 2000); };
+    ws.onerror = function () {};
+  }
+
+  function startPing() {
+    pingTimer = setInterval(function () {
+      send({ t: 'ping', ts: performance.now() });
+    }, 2000);
+  }
+
+  // ---------- 按住 = 开始滚动，松手 = 停止（滚动循环在电脑端跑，网络抖动不影响丝滑） ----------
+  function press(dir, btn) {
+    if (active === dir) return;
+    if (active) release(active);          // 按住另一个箭头时先停掉旧的
+    active = dir;
+    btn.classList.add('pressed');
+    send({ t: 'scrollStart', dir: dir });
+    if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+  }
+
+  function release(dir) {
+    if (active !== dir) return;
+    active = null;
+    var btn = dir === 'up' ? $('btnUp') : $('btnDown');
+    btn.classList.remove('pressed');
+    send({ t: 'scrollStop' });
+  }
+
+  function bind(btn, dir) {
+    btn.addEventListener('touchstart', function (e) { e.preventDefault(); press(dir, btn); }, { passive: false });
+    btn.addEventListener('touchend', function (e) { e.preventDefault(); release(dir); }, { passive: false });
+    btn.addEventListener('touchcancel', function () { release(dir); });
+    btn.addEventListener('mousedown', function (e) { e.preventDefault(); press(dir, btn); });
+    btn.addEventListener('mouseup', function () { release(dir); });
+    btn.addEventListener('mouseleave', function () { release(dir); });
+    btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  }
+  bind($('btnUp'), 'up');
+  bind($('btnDown'), 'down');
+
+  // 页面切后台/锁屏 = 强制停止，防止一直滚
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && active) {
+      active = null;
+      $('btnUp').classList.remove('pressed');
+      $('btnDown').classList.remove('pressed');
+      send({ t: 'scrollStop' });
+    }
+  });
+
+  // ---------- 速度滑块（1-10，手机上手边可调） ----------
+  $('speed').oninput = function () {
+    speed = parseInt(this.value, 10);
+    $('speedVal').textContent = speed;
+    send({ t: 'wset', v: speed });
+  };
+
+  connect();
+  startPing();
+})();
+</script>
+</body>
+</html>
