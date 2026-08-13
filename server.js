@@ -36,6 +36,15 @@ function lanIPs() {
       if (it.family === 'IPv4' && !it.internal) out.push(it.address);
     }
   }
+  // 排序：真实局域网地址优先；链路本地(169.254.x.x，手机访问不到)排最后
+  const score = (ip) => {
+    if (ip.startsWith('169.254.')) return 999; // 链路本地 / 虚拟网卡
+    if (ip.startsWith('192.168.')) return 0;  // 最常见家用局域网
+    if (ip.startsWith('10.')) return 1;
+    if (ip.startsWith('172.')) return 2;
+    return 10;                                 // 公网 IP 排后
+  };
+  out.sort((a, b) => score(a) - score(b));
   return out;
 }
 

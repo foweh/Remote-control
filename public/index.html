@@ -18,6 +18,18 @@
   }
   h1 { font-size: 26px; font-weight: 600; margin-bottom: 6px; }
   .sub { color: #888; font-size: 14px; margin-bottom: 24px; text-align: center; line-height: 1.7; }
+  .warn {
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.35);
+    color: #f87171;
+    border-radius: 14px;
+    padding: 10px 20px;
+    font-size: 13px;
+    margin-bottom: 20px;
+    display: none;
+    text-align: center;
+    line-height: 1.7;
+  }
 
   .cards { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
   .card {
@@ -83,22 +95,24 @@
 <body>
   <h1>🖱️ 手机控制电脑鼠标</h1>
   <div class="sub">
-    手机和电脑连同一个 WiFi，用手机扫下面任意一个二维码即可控制<br />
-    首次运行若弹出防火墙提示，请勾选「专用网络」并允许访问
+    手机和电脑连同一个 WiFi，用手机扫下面任意一个二维码即可直接打开控制页<br />
+    二维码地址为本机真实局域网 IP，随 WiFi 自动更新
   </div>
+
+  <div class="warn" id="warnNoLan">⚠️ 未检测到可用的局域网 IP（电脑没连 WiFi？），手机将无法访问。请连接 WiFi 后刷新本页。</div>
 
   <div class="cards">
     <div class="card">
       <h2>🎮 触摸板控制</h2>
       <div class="desc">手机当触摸板：移动 / 左键 / 右键 / 滚轮 / 键盘输入</div>
       <div class="qr-box"><div id="qrControl"></div></div>
-      <div class="url-text" id="urlControl"></div>
+      <a class="url-text" id="urlControl" target="_blank" rel="noopener"></a>
     </div>
     <div class="card">
       <h2>🔼🔽 滚轮遥控</h2>
       <div class="desc">只有上下两个箭头：按住连续丝滑滚动，速度可调</div>
       <div class="qr-box"><div id="qrScroll"></div></div>
-      <div class="url-text" id="urlScroll"></div>
+      <a class="url-text" id="urlScroll" target="_blank" rel="noopener"></a>
     </div>
   </div>
 
@@ -131,8 +145,9 @@
       qrControl.clear(); qrScroll.clear();
       qrControl.makeCode(url + '/control.html');
       qrScroll.makeCode(url + '/scroll.html');
-      $('urlControl').textContent = url + '/control.html';
-      $('urlScroll').textContent = url + '/scroll.html';
+      var u1 = url + '/control.html', u2 = url + '/scroll.html';
+      $('urlControl').textContent = u1; $('urlControl').href = u1;
+      $('urlScroll').textContent = u2;  $('urlScroll').href = u2;
     }
 
     function selectIp(ip) {
@@ -206,6 +221,8 @@
       ips = info.ips;
       if (ips.length === 0) ips = ['本机IP未找到'];
       renderIpButtons();
+      var hasLan = ips.some(function (ip) { return ip.indexOf('169.254.') !== 0 && ip !== '本机IP未找到'; });
+      if (!hasLan) $('warnNoLan').style.display = 'block';
       qrControl = new QRCode($('qrControl'), { width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
       qrScroll  = new QRCode($('qrScroll'),  { width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
       var saved = null;
