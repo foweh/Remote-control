@@ -51,6 +51,15 @@ function lanIPs() {
 // ---------------- 静态文件 + /info ----------------
 const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
+  if (url === '/') {
+    // 手机访问根地址 → 直接跳到控制页（手机上不显示电脑端的二维码页）
+    const ua = String(req.headers['user-agent'] || '').toLowerCase();
+    if (/android|iphone|ipad|ipod|mobile|harmony/i.test(ua)) {
+      res.writeHead(302, { Location: '/control.html' });
+      res.end();
+      return;
+    }
+  }
   if (url === '/info') {
     const body = JSON.stringify({ ips: lanIPs(), port: PORT, phones: phoneCount() });
     res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });

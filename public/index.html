@@ -103,7 +103,7 @@
 <body>
   <h1>🖱️ 手机控制电脑鼠标</h1>
   <div class="sub">
-    手机和电脑连同一个 WiFi，用手机扫下面任意一个二维码即可直接打开控制页<br />
+    手机和电脑连同一个 WiFi，用手机扫下面的二维码即可直接打开控制页<br />
     二维码地址为本机真实局域网 IP，随 WiFi 自动更新
   </div>
 
@@ -111,18 +111,12 @@
 
   <div class="cards">
     <div class="card">
-      <h2>🎮 触摸板控制</h2>
-      <div class="desc">手机当触摸板：移动 / 左键 / 右键 / 滚轮 / 键盘输入</div>
+      <h2>🎮 手机控制页</h2>
+      <div class="desc">扫这个码 = 手机直接打开控制页：触摸板 / 滚轮遥控 / 键盘输入</div>
       <div class="qr-box"><div id="qrControl"></div></div>
       <a class="url-text" id="urlControl" target="_blank" rel="noopener"></a>
       <div class="scan-hint">用手机自带相机扫码可直接打开网页；<br />若用微信扫码显示为文本：长按复制 → 粘贴到手机浏览器打开</div>
-    </div>
-    <div class="card">
-      <h2>🔼🔽 滚轮遥控</h2>
-      <div class="desc">只有上下两个箭头：按住连续丝滑滚动，速度可调</div>
-      <div class="qr-box"><div id="qrScroll"></div></div>
-      <a class="url-text" id="urlScroll" target="_blank" rel="noopener"></a>
-      <div class="scan-hint">用手机自带相机扫码可直接打开网页；<br />若用微信扫码显示为文本：长按复制 → 粘贴到手机浏览器打开</div>
+      <div class="scan-hint" style="margin-top:2px;">只想用滚轮遥控？控制页右上角有「滚轮」入口；或直接访问 <a id="urlScroll" target="_blank" rel="noopener"></a></div>
     </div>
   </div>
 
@@ -145,16 +139,22 @@
     var port = 8642;
     var ips = [];
     var currentIp = null;
-    var qrControl = null, qrScroll = null;
+    var qrControl = null;
     var ws = null;
 
     var $ = function (id) { return document.getElementById(id); };
 
+    // 手机浏览器访问本页 -> 直接跳到控制页（手机上永远不显示二维码页）
+    if (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent) ||
+        ('ontouchstart' in window && Math.min(screen.width, screen.height) < 768)) {
+      location.replace('/control.html');
+      return;
+    }
+
     function makeQR(el, url) {
       if (!qrControl) return;
-      qrControl.clear(); qrScroll.clear();
+      qrControl.clear();
       qrControl.makeCode(url + '/control.html');
-      qrScroll.makeCode(url + '/scroll.html');
       var u1 = url + '/control.html', u2 = url + '/scroll.html';
       $('urlControl').textContent = u1; $('urlControl').href = u1;
       $('urlScroll').textContent = u2;  $('urlScroll').href = u2;
@@ -233,8 +233,7 @@
       renderIpButtons();
       var hasLan = ips.some(function (ip) { return ip.indexOf('169.254.') !== 0 && ip !== '本机IP未找到'; });
       if (!hasLan) $('warnNoLan').style.display = 'block';
-      qrControl = new QRCode($('qrControl'), { width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
-      qrScroll  = new QRCode($('qrScroll'),  { width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+      qrControl = new QRCode($('qrControl'), { width: 260, height: 260, correctLevel: QRCode.CorrectLevel.M });
       var saved = null;
       try { saved = localStorage.getItem('mousectrl_ip'); } catch (e) {}
       var usable = ips.filter(function (ip) {
