@@ -119,6 +119,7 @@
   var ws = null;
   var speed = 3;
   var active = null; // 'up' | 'down' | null
+  var holdStart = 0;
   var pingTimer = null;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -162,6 +163,7 @@
 
   function press(dir) {
     if (active === dir) return;
+    if (!active) holdStart = Date.now(); // 新按住才计时（换向不算）
     if (active) $('zone' + active[0].toUpperCase() + active.slice(1)).classList.remove('pressed');
     active = dir;
     $('zone' + dir[0].toUpperCase() + dir.slice(1)).classList.add('pressed');
@@ -172,9 +174,14 @@
   function release() {
     if (!active) return;
     var dir = active;
+    var held = Date.now() - holdStart;
     active = null;
     $('zone' + dir[0].toUpperCase() + dir.slice(1)).classList.remove('pressed');
     send({ t: 'scrollStop' });
+    if (held < 250) {
+      // 短按 = 滚一格（点按一步，精确定位）
+      send({ t: 'w', d: dir === 'up' ? 120 : -120 });
+    }
   }
 
   function bindZone(zone, dir) {
